@@ -10,3 +10,6 @@
 .queue-info .queue-error{font-size:var(--text-xs);color:var(--color-brick);line-height:1.9;margin-top:var(--space-sm)}.queue-mapping summary{font-size:var(--text-xs);color:var(--color-accent);cursor:pointer;min-height:44px;display:flex;align-items:center}.queue-mapping form{padding-top:var(--space-xs)}.queue-mapping label{font-size:var(--text-xs);color:var(--color-muted);display:block}.queue-mapping input{width:100%;margin-top:var(--space-sm);padding:var(--space-sm);background:var(--color-surface);border:1px solid var(--color-input-rule);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:var(--text-xs);min-height:44px}
 
 .publications-table{min-width:1060px}.researcher-cell{min-width:145px;max-width:190px;overflow-wrap:anywhere}.researcher-cell>span{display:block}.first-author{display:flex;align-items:center;gap:var(--space-sm);white-space:nowrap;color:var(--color-accent)}.first-author [role="checkbox"]{display:inline-flex;align-items:center;justify-content:center;width:28px;min-height:28px;font-size:var(--text-xl)}.first-author.unknown{color:var(--color-muted)}
+
+/* Keep positioned accessibility labels inside the table scroll container. */
+.table-scroll{position:relative}
