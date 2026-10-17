@@ -1,4 +1,4 @@
-import { blankPublication, identityKey, normalizeDoi, safeUrl, type Identity, type Provider, type Publication, type ResearcherResult } from './model';
+import { blankPublication, identityKey, normalizeDoi, safeUrl, resolutionNames, type Identity, type Provider, type Publication, type ResearcherResult } from './model';
 import { identitySchema } from './identifiers';
 
 export type SheetRow = Record<string, string>;
@@ -123,8 +123,8 @@ export async function exportWorkbook(publications: Publication[], researchers: R
   // All user/source values remain literal strings, never Excel formula objects.
   ws.autoFilter={from:'A1',to:{row:Math.max(1,ws.rowCount),column:columns.length}};
   const rs=wb.addWorksheet('وضعیت پژوهشگران',{views:[{rightToLeft:true}]});
-  rs.columns=[{header:'نوع شناسه',key:'provider',width:20},{header:'شناسه',key:'id',width:30},{header:'نام',key:'name',width:30},{header:'ORCID متناظر',key:'orcid',width:28},{header:'روش تطبیق',key:'resolution',width:20},{header:'تعداد آثار عمومی',key:'total',width:22},{header:'وضعیت',key:'status',width:20},{header:'توضیح',key:'message',width:100}];
-  researchers.forEach(r=>rs.addRow({provider:r.identity.provider,id:r.identity.id,name:r.name,orcid:r.resolvedOrcid,resolution:r.resolution,total:r.total,status:r.status,message:r.message}));
+  rs.columns=[{header:'نوع شناسه',key:'provider',width:20},{header:'شناسه',key:'id',width:30},{header:'نام',key:'name',width:30},{header:'ORCID متناظر',key:'orcid',width:28},{header:'روش تطبیق',key:'resolution',width:20},{header:'تعداد رکورد منبع',key:'total',width:22},{header:'وضعیت',key:'status',width:20},{header:'توضیح',key:'message',width:100}];
+  researchers.forEach(r=>rs.addRow({provider:r.identity.provider,id:r.identity.id,name:r.name,orcid:r.resolvedOrcid,resolution:r.resolution?resolutionNames[r.resolution]:'',total:r.total,status:r.status,message:r.message}));
   const issues=wb.addWorksheet('گزارش و محدودیت‌ها',{views:[{rightToLeft:true}]}); issues.getColumn(1).width=120;
   ['پوشش آثار به داده عمومی ORCID و فایل‌های واردشده محدود است؛ همه مقالات همه پایگاه‌ها تضمین نمی‌شود.','نویسندگان، جلد، شماره و سایر داده‌های خالی در منابع در دسترس نبوده‌اند؛ مقدار حدسی تولید نشده است.','منابع در ستون منابع مشخص‌اند؛ ورود یک Scopus ID به معنی دریافت از Scopus نیست.','فقط DOI یکسان یا کلید یکسان اثر ادغام می‌شود؛ تشابه عنوان به‌تنهایی مبنای ادغام نیست.',...warnings].forEach(t=>issues.addRow([t]));
   for(const sheet of wb.worksheets){sheet.getRow(1).font={bold:true};sheet.eachRow(r=>r.eachCell(c=>{c.alignment={vertical:'top',wrapText:true};c.numFmt='@';}));}

@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { blankPublication } from '../../lib/model';
 import ExcelJS from 'exceljs';
 import { readFile } from 'node:fs/promises';
+import type { Identity } from '../../lib/model';
 test('manual queue, acquisition, filters, details, literal Excel export and persistence',async({page})=>{
  const records=[{...blankPublication(),key:'test:one',title:'A study of open research',authors:['Ali Karimi','Sara Rahimi'],journal:'Research Journal',year:'2024',volume:'5',issue:'2',sources:['ORCID','Crossref'],doi:'10.1234/test',queriedIds:['orcid:0000-0002-1825-0097']},{...blankPublication(),key:'test:two',title:'=A literal title',year:'2020',sources:['ORCID']}];
  await page.route('**/api/collect',route=>route.fulfill({json:{publications:records,researcher:{identity:{provider:'orcid',id:'0000-0002-1825-0097',name:''},resolvedOrcid:'0000-0002-1825-0097',resolution:'direct',name:'Test',total:2,status:'complete',message:'Test response'},nextOffset:null,warnings:[],snapshot:'test'}}));
@@ -21,6 +22,21 @@ test('spreadsheet template round trip and CSV publication import',async({page})=
  await expect(page.getByText('Josiah Carberry (پروفایل نمونه ORCID)',{exact:true})).toBeVisible();
  await page.getByLabel('فایل مقالات',{exact:true}).setInputFiles({name:'papers.csv',mimeType:'text/csv',buffer:Buffer.from('Title,Authors,Year,Volume,Issue\n"A, B",A; B,2023,4,2')});await expect(page.getByRole('button',{name:'A, B',exact:true})).toBeVisible();
  await page.getByLabel('فایل شناسه‌های پژوهشگران',{exact:true}).setInputFiles({name:'bad.csv',mimeType:'text/csv',buffer:Buffer.from('ORCID\nbad')});await expect(page.locator('#input-errors')).toBeVisible();
+});
+for (const example of [
+ {provider:'scopus',id:'7004212771',tab:'Scopus',label:'Scopus Author ID'},
+ {provider:'wos',id:'A-2363-2010',tab:'WoS',label:'WoS Researcher ID'},
+ {provider:'scholar',id:'jD_4h7sAAAAJ',tab:'Scholar',label:'Google Scholar User ID'}
+]) test(`${example.provider}: resolve an unsuccessful ID using its inline ORCID mapping`,async({page})=>{
+ await page.route('**/api/collect',async route=>{
+   const input=route.request().postDataJSON() as {identity:Identity}; const mapped=!!input.identity.orcid;
+   await route.fulfill({json:{researcher:{identity:input.identity,resolvedOrcid:mapped?'0000-0002-1825-0097':undefined,resolution:mapped?'user':undefined,name:'',total:mapped?1:0,status:mapped?'complete':'unresolved',message:mapped?'Mapped profile received':'پیوند تأییدشده پیدا نشد.'},publications:mapped?[{...blankPublication(),key:`test:${example.provider}`,title:`Recovered ${example.provider} paper`,sources:['ORCID'],queriedIds:[`${example.provider}:${example.id}`]}]:[],nextOffset:null,warnings:[],snapshot:''}});
+ });
+ await page.goto('/');await page.getByRole('button',{name:example.tab,exact:true}).click();await page.getByLabel(example.label,{exact:true}).fill(example.id);await page.getByRole('button',{name:'افزودن به فهرست',exact:true}).click();await page.getByRole('button',{name:'دریافت آثار',exact:true}).click();
+ await expect(page.getByText('نیازمند ORCID متناظر',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:/گزارش دریافت و کیفیت داده/})).toHaveAttribute('aria-expanded','true');
+ await page.getByText('تعیین ORCID متناظر',{exact:true}).click();await page.getByLabel(`ORCID متناظر برای ${example.id}`,{exact:true}).fill('0000-0002-1825-0097');await page.getByRole('button',{name:'ثبت ORCID',exact:true}).click();
+ await page.getByRole('button',{name:'دریافت آثار',exact:true}).click();await expect(page.getByRole('button',{name:`Recovered ${example.provider} paper`,exact:true})).toBeVisible();
 });
 for(const width of [320,375,414,768,1280,1920])test(`responsive workspace at ${width}px`,async({page})=>{
  await page.setViewportSize({width,height:900});await page.goto('/');await page.evaluate(()=>document.fonts.ready);

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Identity, Provider } from './model';
+import { resolutionMethods } from './model';
 
 export function validOrcid(value: string): boolean {
   if (!/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(value)) return false;
@@ -10,13 +11,14 @@ export function validOrcid(value: string): boolean {
   return digits[15] === (check === 10 ? 'X' : String(check));
 }
 export function normalizeId(provider: Provider, raw: string): string {
-  let value = raw.trim().replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+  let value = raw.trim().replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '').replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
   try {
     const u = new URL(value);
-    if (provider === 'scholar' && /(^|\.)scholar\.google\./.test(u.hostname)) value = u.searchParams.get('user') || '';
-    else if (provider === 'scopus' && /(^|\.)scopus\.com$/.test(u.hostname)) value = u.searchParams.get('authorId') || '';
+    if (provider === 'scholar' && /^scholar\.google\.(?:com|[a-z]{2}|(?:com|co)\.[a-z]{2})$/.test(u.hostname)) value = u.searchParams.get('user') || '';
+    else if (provider === 'scopus' && /(^|\.)scopus\.com$/.test(u.hostname)) value = u.searchParams.get('authorId') || u.searchParams.get('authorID') || '';
     else if (provider === 'orcid' && /(^|\.)orcid\.org$/.test(u.hostname)) value = u.pathname.split('/').filter(Boolean).pop() || '';
     else if (provider === 'wos' && /(^|\.)webofscience\.com$/.test(u.hostname)) value = u.pathname.match(/(?:author\/record|researcher)\/([^/]+)/)?.[1] || '';
+    else if (provider === 'wos' && /(^|\.)researcherid\.com$/.test(u.hostname)) value = u.pathname.match(/\/rid\/([^/]+)/i)?.[1] || '';
   } catch { /* Plain identifiers are expected. */ }
   if (provider === 'orcid' || provider === 'wos') value = value.toUpperCase();
   return value;
@@ -37,7 +39,7 @@ export const identitySchema = z.object({
     if (error) ctx.addIssue({ code: 'custom', message: error, path: ['id'] });
     if (v.orcid && !validOrcid(v.orcid)) ctx.addIssue({ code: 'custom', message: 'ORCID متناظر معتبر نیست.', path: ['orcid'] });
   });
-export const collectSchema = z.object({ identity: identitySchema, offset: z.number().int().min(0).max(100000).default(0), resolvedOrcid: z.string().refine(validOrcid).optional(), resolution: z.enum(['direct','user','wikidata']).optional(), snapshot: z.string().max(100).optional(), enrich: z.boolean().default(true) });
+export const collectSchema = z.object({ identity: identitySchema, offset: z.number().int().min(0).max(100000).default(0), resolvedOrcid: z.string().refine(validOrcid).optional(), resolvedName: z.string().max(200).optional(), resolution: z.enum(resolutionMethods).optional(), snapshot: z.string().max(100).optional(), enrich: z.boolean().default(true) });
 export function parseManual(provider: Provider, text: string, name = '', orcid = ''): { identities: Identity[]; errors: string[] } {
   const identities: Identity[] = []; const errors: string[] = [];
   const parts = text.split(/[\s,;،]+/).filter(Boolean);

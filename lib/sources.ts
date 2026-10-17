@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { Identity, Publication, CollectResponse, ResearcherResult } from './model';
 import { blankPublication, normalizeDoi, safeUrl, identityKey } from './model';
-import { validOrcid } from './identifiers';
 import { fetchJson, mapLimit, SourceError } from './http';
+import { orcidHeaders, resolveIdentityWithReport } from './identity-resolution';
+import { collectScholarProfile } from './scholar';
+export { resolveIdentity } from './identity-resolution';
 
 interface Value { value?: string }
 interface ExternalId { 'external-id-type': string; 'external-id-value': string; 'external-id-relationship'?: string }
@@ -18,19 +20,6 @@ export interface CrossrefWork {
   'container-title'?: string[]; volume?: string; issue?: string; page?: string;
   'article-number'?: string; ISSN?: string[]; publisher?: string; type?: string;
   published?: { 'date-parts'?: number[][] }; DOI?: string;
-}
-const orcidHeaders = (): Record<string, string> => process.env.ORCID_ACCESS_TOKEN ? { Authorization: `Bearer ${process.env.ORCID_ACCESS_TOKEN}` } : {};
-
-export async function resolveIdentity(identity: Identity): Promise<{ orcid: string; resolution: ResearcherResult['resolution'] } | null> {
-  if (identity.provider === 'orcid') return { orcid: identity.id, resolution: 'direct' };
-  if (identity.orcid) return { orcid: identity.orcid, resolution: 'user' };
-  const property = { scopus: 'P1153', wos: 'P1053', scholar: 'P1960' }[identity.provider];
-  // Identifier validation runs before this function. Only validated literals enter SPARQL.
-  const query = `SELECT DISTINCT ?orcid WHERE { ?person wdt:${property} ${JSON.stringify(identity.id)}; wdt:P496 ?orcid. } LIMIT 3`;
-  const data = await fetchJson<{ results?: { bindings?: { orcid?: Value }[] } }>(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`, 'Wikidata');
-  const candidates = [...new Set((data.results?.bindings || []).map(b => b.orcid?.value || '').filter(validOrcid))];
-  // Ambiguous public mappings are never silently selected.
-  return candidates.length === 1 ? { orcid: candidates[0], resolution: 'wikidata' } : null;
 }
 export function fromOrcid(work: OrcidWork, identity: Identity, orcid: string): Publication {
   const p = blankPublication(); const date = work['publication-date'];
@@ -54,14 +43,32 @@ export function enrichCrossref(p: Publication, work: CrossrefWork): Publication 
     publisher: work.publisher || p.publisher, year: p.year || String(work.published?.['date-parts']?.[0]?.[0] || ''),
     sources: [...new Set([...p.sources, 'Crossref'])] };
 }
-export async function collectPage(input: { identity: Identity; offset: number; resolvedOrcid?: string; resolution?: ResearcherResult['resolution']; snapshot?: string; enrich: boolean }): Promise<CollectResponse> {
+export async function collectPage(input: { identity: Identity; offset: number; resolvedOrcid?: string; resolvedName?: string; resolution?: ResearcherResult['resolution']; snapshot?: string; enrich: boolean }): Promise<CollectResponse> {
   const { identity, offset, enrich } = input;
-  const resolved = offset > 0 && input.resolvedOrcid ? { orcid: input.resolvedOrcid, resolution: input.resolution } : await resolveIdentity(identity);
+  const report = offset > 0 && input.resolvedOrcid
+    ? { match: { orcid: input.resolvedOrcid, resolution: input.resolution, name: input.resolvedName }, warnings: [], ambiguous: false, unavailable: false }
+    : await resolveIdentityWithReport(identity);
+  const resolved = report.match;
   const researcher: ResearcherResult = { identity, name: identity.name, total: 0, status: 'unresolved', message: '' };
   if (!resolved) {
-    researcher.message = 'پیوند عمومی یکتایی به ORCID در Wikidata پیدا نشد. ORCID متناظر را به همین شناسه اضافه کنید یا فایل مقالات این پایگاه را وارد کنید. این وضعیت به معنی نداشتن مقاله نیست.';
-    return { researcher, publications: [], nextOffset: null, warnings: [], snapshot: '' };
+    if (identity.provider === 'scholar') {
+      try {
+        const result = await collectScholarProfile(identity);
+        result.warnings = [...report.warnings, ...result.warnings];
+        if (result.warnings.length) result.researcher.status = 'partial';
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'صفحه عمومی Scholar دریافت نشد.';
+        researcher.status = 'error'; researcher.message = `${message} می‌توانید ORCID متناظر را تعیین کنید یا فایل CSV پروفایل را وارد کنید.`;
+        return {researcher,publications:[],nextOffset:null,warnings:[...report.warnings,message],snapshot:''};
+      }
+    }
+    researcher.status = report.unavailable ? 'error' : 'unresolved';
+    researcher.message = report.ambiguous ? 'چند پیوند ORCID ناسازگار پیدا شد؛ برای جلوگیری از انتساب اشتباه، ORCID متناظر را خودتان تعیین کنید.'
+      : 'پیوند تأییدشده به ORCID در جست‌وجوی ORCID و Wikidata پیدا نشد. از «تعیین ORCID متناظر» کنار همین شناسه استفاده کنید یا فایل مقالات را وارد کنید. این نتیجه به معنی نداشتن مقاله نیست.';
+    return { researcher, publications: [], nextOffset: null, warnings: report.warnings, snapshot: '' };
   }
+  researcher.name = identity.name || resolved.name || '';
   researcher.resolvedOrcid = resolved.orcid; researcher.resolution = resolved.resolution;
   const base = `https://pub.orcid.org/v3.0/${resolved.orcid}`;
   const summary = await fetchJson<OrcidSummary>(`${base}/works`, 'ORCID', orcidHeaders());
@@ -70,7 +77,7 @@ export async function collectPage(input: { identity: Identity; offset: number; r
   const snapshot = createHash('sha256').update(`${summary['last-modified-date']?.value}:${groups.map(w=>w['put-code']).join(',')}`).digest('hex').slice(0,24);
   if (input.snapshot && snapshot !== input.snapshot) throw new SourceError('ORCID',409,'فهرست آثار حین دریافت تغییر کرد؛ دریافت این پژوهشگر را از ابتدا تکرار کنید.');
   researcher.total = groups.length;
-  const warnings: string[] = [];
+  const warnings: string[] = [...report.warnings];
   const current = groups.slice(offset, offset + 4);
   // Four bounded requests at a time, with a maximum of four works per invocation.
   const publications = await mapLimit(current, 4, async summaryWork => {

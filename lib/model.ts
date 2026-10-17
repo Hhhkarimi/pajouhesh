@@ -1,6 +1,8 @@
 export const providers = ['orcid', 'scopus', 'wos', 'scholar'] as const;
 export type Provider = typeof providers[number];
 export const providerNames: Record<Provider, string> = { orcid: 'ORCID', scopus: 'Scopus', wos: 'Web of Science', scholar: 'Google Scholar' };
+export const resolutionMethods = ['direct', 'user', 'wikidata', 'orcid-search', 'scholar-public'] as const;
+export const resolutionNames: Record<typeof resolutionMethods[number], string> = { direct: 'ورودی مستقیم ORCID', user: 'نگاشت تعیین‌شده توسط شما', wikidata: 'پیوند عمومی Wikidata', 'orcid-search': 'شناسه تأییدشده در پروفایل ORCID', 'scholar-public': 'صفحه عمومی Google Scholar' };
 export interface Identity { provider: Provider; id: string; name: string; orcid?: string }
 export interface Publication {
   key: string; title: string; authors: string[]; journal: string; year: string;
@@ -10,7 +12,7 @@ export interface Publication {
   retrievedAt: string; originalPublication: string;
 }
 export interface ResearcherResult {
-  identity: Identity; resolvedOrcid?: string; resolution?: 'direct' | 'user' | 'wikidata';
+  identity: Identity; resolvedOrcid?: string; resolution?: typeof resolutionMethods[number];
   name: string; total: number; status: 'complete' | 'partial' | 'unresolved' | 'error'; message: string;
 }
 export interface CollectResponse {
