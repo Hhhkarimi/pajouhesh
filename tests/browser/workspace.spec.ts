@@ -43,3 +43,34 @@ for(const width of [320,375,414,768,1280,1920])test(`responsive workspace at ${w
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await expect(page.getByRole('heading',{name:'آثار پژوهشی، یک‌جا.'})).toBeVisible();
  await page.screenshot({path:`test-results/workspace-${width}.png`,fullPage:true});
 });
+test('duplicate titles collapse per researcher, preserving richest metadata and separate first-author checkboxes in Excel',async({page})=>{
+ await page.goto('/');
+ const buffer=Buffer.from('Title,Researcher Name,Authors,Journal,Year,Volume,Issue,DOI\nShared research: a study,Ali Karimi,Ali Karimi; Sara Rahimi,,2020,,,\nSHARED RESEARCH - A STUDY,Ali Karimi,Ali Karimi; Sara Rahimi,Complete Journal,2025,7,2,10.1234/shared\nShared research: a study,Sara Rahimi,Ali Karimi; Sara Rahimi,Other Journal,2024,3,1,10.1234/shared\nA separate work,Alex Smith,A Smith; B Jones,,2023,,,');
+ await page.getByLabel('فایل مقالات',{exact:true}).setInputFiles({name:'shared.csv',mimeType:'text/csv',buffer});
+ const rows=page.locator('.publications-table tbody tr');await expect(rows).toHaveCount(3);
+ const ali=rows.filter({has:page.locator('.researcher-cell',{hasText:'Ali Karimi'})});const sara=rows.filter({has:page.locator('.researcher-cell',{hasText:'Sara Rahimi'})});
+ await expect(ali).toContainText('Complete Journal');await expect(ali).toContainText('2025');await expect(ali.getByRole('checkbox')).toHaveAttribute('aria-checked','true');
+ await expect(sara).toContainText('Other Journal');await expect(sara.getByRole('checkbox')).toHaveAttribute('aria-checked','false');await expect(rows.filter({hasText:'Alex Smith'}).getByRole('checkbox')).toHaveAttribute('aria-checked','mixed');
+ await ali.getByRole('button',{name:'SHARED RESEARCH - A STUDY',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('تطابق کامل نام پژوهشگر');await page.keyboard.press('Escape');
+ const pending=page.waitForEvent('download');await page.getByRole('button',{name:/دریافت اکسل/}).click();const file=await pending;const wb=new ExcelJS.Workbook();await wb.xlsx.readFile((await file.path())!);
+ const sheet=wb.worksheets[0];expect(sheet.rowCount).toBe(4);expect(sheet.getCell('B1').text).toBe('نام پژوهشگر صاحب شناسه');expect(sheet.getCell('C1').text).toBe('نویسنده اول');
+ const data=sheet.getRows(2,3)!;expect(data.find(r=>r.getCell(2).text==='Ali Karimi')?.getCell(3).text).toBe('☑ بله');expect(data.find(r=>r.getCell(2).text==='Sara Rahimi')?.getCell(3).text).toBe('☐ خیر');expect(data.find(r=>r.getCell(2).text==='Alex Smith')?.getCell(3).text).toBe('— نامشخص');
+ await page.getByLabel('نگهداری فهرست و نتیجه‌ها فقط در همین مرورگر').check();await page.reload();await expect(rows).toHaveCount(3);await expect(page.getByRole('checkbox',{name:'نویسنده اول: Ali Karimi',exact:true})).toHaveAttribute('aria-checked','true');
+ await page.setViewportSize({width:375,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.locator('.results-area').scrollIntoViewIfNeeded();await page.screenshot({path:'test-results/shared-articles-mobile.png',fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:'test-results/shared-articles-desktop.png',fullPage:true});
+});
+test('multiple provider IDs merge for one owner while a second researcher keeps the same article',async({page})=>{
+ await page.route('**/api/collect',async route=>{
+   const {identity}=route.request().postDataJSON() as {identity:Identity};const isSara=identity.id==='0000-0003-2625-9232';const poor=identity.provider==='orcid'&&!isSara;
+   await route.fulfill({json:{researcher:{identity,resolvedOrcid:isSara?'0000-0003-2625-9232':'0000-0002-1825-0097',name:identity.name,aliases:[isSara?'Sara Rahimi':'Ali Karimi'],total:1,status:'complete',message:''},publications:[{...blankPublication(),key:identity.provider+identity.id,title:poor?'Shared research: a study':'SHARED RESEARCH - A STUDY',authors:['Ali Karimi','Sara Rahimi'],sources:['Crossref'],volume:poor?'':'9',doi:'10.1234/shared',queriedIds:[`${identity.provider}:${identity.id}`]}],nextOffset:null,warnings:[],snapshot:'test'}});
+ });
+ await page.goto('/');await page.getByLabel('فایل شناسه‌های پژوهشگران',{exact:true}).setInputFiles({name:'ids.csv',mimeType:'text/csv',buffer:Buffer.from('Name,ORCID,Scopus Author ID,WoS Researcher ID,Google Scholar ID\nAli Karimi,0000-0002-1825-0097,7004212771,A-2363-2010,jD_4h7sAAAAJ\nSara Rahimi,0000-0003-2625-9232,,,')});
+ await page.getByRole('button',{name:'دریافت آثار',exact:true}).click();await expect(page.getByRole('status').last()).toContainText('دریافت پایان یافت');await expect(page.locator('.publications-table tbody tr')).toHaveCount(2);
+ await expect(page.getByRole('checkbox',{name:'نویسنده اول: Ali Karimi',exact:true})).toHaveAttribute('aria-checked','true');await expect(page.getByRole('checkbox',{name:'نویسنده اول: Sara Rahimi',exact:true})).toHaveAttribute('aria-checked','false');
+});
+test('legacy saved publications recover their owners and deduplicate on restore',async({page})=>{
+ const identity={provider:'orcid',id:'0000-0002-1825-0097',name:'Ali Karimi'};
+ const old=JSON.parse(JSON.stringify({...blankPublication(),key:'old',title:'Saved study',authors:['Ali Karimi','Sara Rahimi'],sources:['Crossref'],queriedIds:['orcid:'+identity.id],orcids:[identity.id]}));delete old.authorDetails;delete old.researchers;
+ await page.addInitScript(value=>localStorage.setItem('pajouhesh-workspace-v1',JSON.stringify(value)),{queue:[identity],publications:[old,{...old,key:'old2',volume:'4'}],researchers:[{identity,resolvedOrcid:identity.id,name:'Ali Karimi',total:2,status:'complete',message:''}],warnings:[]});
+ await page.goto('/');await expect(page.locator('.publications-table tbody tr')).toHaveCount(1);await expect(page.getByRole('checkbox',{name:'نویسنده اول: Ali Karimi',exact:true})).toHaveAttribute('aria-checked','true');
+});

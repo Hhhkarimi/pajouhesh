@@ -2,6 +2,7 @@ import { load } from 'cheerio';
 import { createHash } from 'node:crypto';
 import { blankPublication, identityKey, safeUrl, type Identity, type CollectResponse } from './model';
 import { fetchHtml, SourceError } from './http';
+import { withResearcher } from './authorship';
 
 export function parseScholarProfile(html: string, identity: Identity): CollectResponse {
   const $ = load(html); const name = $('#gsc_prf_in').text().trim();
@@ -25,6 +26,7 @@ export function parseScholarProfile(html: string, identity: Identity): CollectRe
     const originalAuthors = row.find('.gsc_a_t .gs_gray').eq(0).text().trim();
     p.key = `scholar:${identity.id}:${articleUrl || `${index}:${title}`}`; p.title = title;
     p.authors = originalAuthors.split(/\s*[,;]\s*/).filter(Boolean);
+    p.authorDetails=p.authors.map((author,index)=>({name:author,orcid:'',position:index===0?'first':'additional',source:'Google Scholar'}));
     p.originalPublication = row.find('.gsc_a_t .gs_gray').eq(1).text().trim();
     p.year = row.find('.gsc_a_y .gsc_a_h, .gsc_a_y span').first().text().trim();
     p.url = articleUrl || profileUrl; p.sources = ['Google Scholar']; p.queriedIds = [identityKey(identity)];
@@ -38,10 +40,8 @@ export function parseScholarProfile(html: string, identity: Identity): CollectRe
     ...(hasMore ? ['فقط صفحه عمومی اول Scholar (حداکثر ۱۰۰ اثر) دریافت شد؛ برای دریافت تمام آثار فایل خروجی CSV را وارد کنید.'] : []),
     ...(malformed ? ['برخی ردیف‌های Scholar قابل خواندن نبودند؛ نتیجه جزئی است.'] : [])
   ];
-  return {
-    researcher: { identity, name: identity.name || name, resolution: 'scholar-public', total: publications.length, status: hasMore || malformed ? 'partial' : 'complete', message: `دریافت مستقیم ${publications.length} ردیف از صفحه عمومی Google Scholar. نام‌های کامل نویسندگان، DOI، جلد و شماره ممکن است در این صفحه ثبت نشده باشند.` },
-    publications, nextOffset: null, warnings, snapshot: createHash('sha256').update(publications.map(p=>p.key).join('\n')).digest('hex').slice(0,24)
-  };
+  const researcher:CollectResponse['researcher']={identity,name:identity.name||name,aliases:[name],resolution:'scholar-public',total:publications.length,status:hasMore||malformed?'partial':'complete',message:`دریافت مستقیم ${publications.length} ردیف از صفحه عمومی Google Scholar. نام‌های کامل نویسندگان، DOI، جلد و شماره ممکن است در این صفحه ثبت نشده باشند.`};
+  return {researcher,publications:publications.map(p=>withResearcher(p,researcher)),nextOffset:null,warnings,snapshot:createHash('sha256').update(publications.map(p=>p.key).join('\n')).digest('hex').slice(0,24)};
 }
 export async function collectScholarProfile(identity: Identity): Promise<CollectResponse> {
   // This public profile path is allowed by Scholar's robots.txt. Pagination with cstart is disallowed and is never requested.

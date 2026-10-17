@@ -30,11 +30,12 @@ test('source exports preserve Google Publication and reject missing titles',()=>
  assert.equal(publications[0].originalPublication,'Journal 3 (2), 1-5');assert.equal(publications[0].journal,'');
  assert.deepEqual(publications[0].authors,['A','B']);assert.equal(publications[0].doi,'10.1234/abc');assert.equal(errors.length,1);assert.equal(safeUrl('javascript:alert(1)'),'');
 });
-test('deduplication uses exact DOI or stable source key; merges provenance',()=>{
+test('deduplication merges normalized titles and provenance within one researcher',()=>{
  const a={...blankPublication(),key:'a',title:'Same title',doi:'10.1234/ABC',sources:['ORCID'],queriedIds:['orcid:one']};
  const b={...blankPublication(),key:'b',title:'Same title',doi:'https://doi.org/10.1234/abc',volume:'9',authors:['A'],sources:['Crossref'],queriedIds:['scopus:two']};
+ a.orcids=['0000-0002-1825-0097'];b.orcids=[...a.orcids];
  const result=mergePublications([a,b]);assert.equal(result.length,1);assert.equal(result[0].volume,'9');assert.deepEqual(result[0].sources,['ORCID','Crossref']);assert.equal(result[0].queriedIds.length,2);
- assert.equal(mergePublications([{...a,doi:''},{...b,doi:''}]).length,2);
+ assert.equal(mergePublications([{...a,doi:''},{...b,doi:''}]).length,1);
 });
 test('Crossref enriches exact DOI only; no fabricated authors',()=>{
  const work:OrcidWork={'put-code':1,title:{title:{value:'Paper'}},'publication-date':{year:{value:'2024'}},'external-ids':{'external-id':[{'external-id-type':'doi','external-id-value':'10.1234/example','external-id-relationship':'self'}]}};

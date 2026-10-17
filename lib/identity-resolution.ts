@@ -8,7 +8,8 @@ export interface OrcidPerson {
   'external-identifiers'?: { 'external-identifier'?: { 'external-id-type'?: string; 'external-id-value'?: string; 'external-id-url'?: Value }[] };
   'researcher-urls'?: { 'researcher-url'?: { url?: Value }[] };
 }
-export interface ResolvedIdentity { orcid: string; resolution: ResearcherResult['resolution']; name?: string }
+export interface ResolvedIdentity { orcid: string; resolution: ResearcherResult['resolution']; name?: string; aliases?:string[] }
+export function personNames(person:OrcidPerson):string[]{return [...new Set([person.name?.['credit-name']?.value,[person.name?.['given-names']?.value,person.name?.['family-name']?.value].filter(Boolean).join(' ')].filter((n):n is string=>!!n))];}
 export interface ResolutionReport { match: ResolvedIdentity | null; warnings: string[]; ambiguous: boolean; unavailable: boolean }
 const lookupOptions = { timeoutMs: 4000, retries: 0 };
 export const orcidHeaders = (): Record<string, string> => process.env.ORCID_ACCESS_TOKEN ? { Authorization: `Bearer ${process.env.ORCID_ACCESS_TOKEN}` } : {};
@@ -56,8 +57,8 @@ export async function resolveIdentityWithReport(identity: Identity): Promise<Res
       try {
         const person = await fetchJson<OrcidPerson>(`https://pub.orcid.org/v3.0/${orcid}/person`, 'ORCID', orcidHeaders(), lookupOptions);
         if (!personMatchesIdentity(person, identity)) return null;
-        const name = person.name?.['credit-name']?.value || [person.name?.['given-names']?.value, person.name?.['family-name']?.value].filter(Boolean).join(' ');
-        return { orcid, resolution: 'orcid-search' as const, name };
+        const aliases=personNames(person);
+        return { orcid, resolution: 'orcid-search' as const, name:aliases[0]||'',aliases };
       } catch (error) { warnings.push(error instanceof Error ? error.message : 'تأیید شناسه در پروفایل ORCID انجام نشد.'); return null; }
     });
     for (const match of verified) if (match) candidates.set(match.orcid, match);

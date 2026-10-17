@@ -39,7 +39,7 @@ export const identitySchema = z.object({
     if (error) ctx.addIssue({ code: 'custom', message: error, path: ['id'] });
     if (v.orcid && !validOrcid(v.orcid)) ctx.addIssue({ code: 'custom', message: 'ORCID متناظر معتبر نیست.', path: ['orcid'] });
   });
-export const collectSchema = z.object({ identity: identitySchema, offset: z.number().int().min(0).max(100000).default(0), resolvedOrcid: z.string().refine(validOrcid).optional(), resolvedName: z.string().max(200).optional(), resolution: z.enum(resolutionMethods).optional(), snapshot: z.string().max(100).optional(), enrich: z.boolean().default(true) });
+export const collectSchema = z.object({ identity: identitySchema, offset: z.number().int().min(0).max(100000).default(0), resolvedOrcid: z.string().refine(validOrcid).optional(), resolvedName: z.string().max(200).optional(), resolvedAliases:z.array(z.string().max(200)).max(10).optional(), resolution: z.enum(resolutionMethods).optional(), snapshot: z.string().max(100).optional(), enrich: z.boolean().default(true) });
 export function parseManual(provider: Provider, text: string, name = '', orcid = ''): { identities: Identity[]; errors: string[] } {
   const identities: Identity[] = []; const errors: string[] = [];
   const parts = text.split(/[\s,;،]+/).filter(Boolean);

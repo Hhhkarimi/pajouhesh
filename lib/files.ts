@@ -1,5 +1,7 @@
 import { blankPublication, identityKey, normalizeDoi, safeUrl, resolutionNames, type Identity, type Provider, type Publication, type ResearcherResult } from './model';
 import { identitySchema } from './identifiers';
+import { mergePublications } from './model';
+import { normalizeName, publicationResearchers, firstAuthorLabel } from './authorship';
 
 export type SheetRow = Record<string, string>;
 const normalizeHeader = (v: string): string => v.toLowerCase().replace(/[\s_\-\u200c]+/g, '').replaceAll('ي','ی').replaceAll('ك','ک').replace(/^\uFEFF/,'');
@@ -91,6 +93,9 @@ export function publicationsFromRows(rows: SheetRow[], filename: string): { publ
     p.date = cell(row,'Date','تاریخ انتشار'); p.sources = [`فایل: ${filename}`];
     p.queriedIds = cell(row,'Queried IDs','شناسه‌های ورودی').split(';').map(s=>s.trim()).filter(Boolean);
     p.orcids = cell(row,'ORCID','ORCID ID').split(';').map(s=>s.trim()).filter(Boolean);
+    const owner=cell(row,'Researcher Name','Name','نام پژوهشگر','پژوهشگر صاحب شناسه','نام پژوهشگر صاحب شناسه');
+    if(owner||p.orcids.length===1){const orcid=p.orcids.length===1?p.orcids[0]:'';p.researchers=[{key:orcid?`orcid:${orcid}`:`name:${normalizeName(owner)}`,name:owner||orcid,orcid,aliases:owner?[owner]:[],queriedIds:p.queriedIds}];}
+    p.authorDetails=p.authors.map((name,index)=>({name,orcid:'',position:index===0?'first':'additional',source:`فایل: ${filename}`}));
     p.notes = ['از فایل کاربر وارد شده؛ انتساب مقاله به پژوهشگر به‌صورت خودکار تأیید نشده است.'];
     publications.push(p);
   });
@@ -118,15 +123,19 @@ export async function exportWorkbook(publications: Publication[], researchers: R
   const columns: [keyof Publication,string,number][] = [
     ['title','عنوان مقاله',65],['authors','نویسندگان',60],['journal','نام ژورنال',40],['year','سال',12],['volume','جلد',12],['issue','شماره',12],['pages','صفحات',18],['articleNumber','شماره مقاله',18],['doi','DOI',40],['issn','ISSN',24],['publisher','ناشر',30],['type','نوع اثر',25],['date','تاریخ انتشار',20],['url','URL',45],['sources','منابع',30],['queriedIds','شناسه‌های ورودی',40],['orcids','ORCID',30],['retrievedAt','زمان دریافت',25],['notes','یادداشت‌ها',70],['originalPublication','مشخصات انتشار اولیه',50]
   ];
-  ws.columns=columns.map(([key,header,width])=>({key,header,width}));
-  publications.forEach(p=>ws.addRow(Object.fromEntries(columns.map(([key])=>[key,Array.isArray(p[key]) ? p[key].join('; ') : p[key]]))));
+  const exportColumns=[...columns.slice(0,1),['researcher','نام پژوهشگر صاحب شناسه',30],['firstAuthor','نویسنده اول',18],['firstAuthorReason','مبنای تشخیص نویسنده اول',65],...columns.slice(1)] as const;
+  ws.columns=exportColumns.map(([key,header,width])=>({key,header,width}));
+  mergePublications(publications).forEach(p=>{
+    const assessments=publicationResearchers(p);
+    ws.addRow({...Object.fromEntries(columns.map(([key])=>[key,Array.isArray(p[key]) ? p[key].join('; ') : p[key]])),researcher:assessments.map(a=>a.researcher.name).join('\n'),firstAuthor:assessments.length?assessments.map(a=>firstAuthorLabel(a.firstAuthor)).join('\n'):'— نامشخص',firstAuthorReason:assessments.map(a=>a.reason).join('\n')});
+  });
   // All user/source values remain literal strings, never Excel formula objects.
-  ws.autoFilter={from:'A1',to:{row:Math.max(1,ws.rowCount),column:columns.length}};
+  ws.autoFilter={from:'A1',to:{row:Math.max(1,ws.rowCount),column:exportColumns.length}};
   const rs=wb.addWorksheet('وضعیت پژوهشگران',{views:[{rightToLeft:true}]});
   rs.columns=[{header:'نوع شناسه',key:'provider',width:20},{header:'شناسه',key:'id',width:30},{header:'نام',key:'name',width:30},{header:'ORCID متناظر',key:'orcid',width:28},{header:'روش تطبیق',key:'resolution',width:20},{header:'تعداد رکورد منبع',key:'total',width:22},{header:'وضعیت',key:'status',width:20},{header:'توضیح',key:'message',width:100}];
   researchers.forEach(r=>rs.addRow({provider:r.identity.provider,id:r.identity.id,name:r.name,orcid:r.resolvedOrcid,resolution:r.resolution?resolutionNames[r.resolution]:'',total:r.total,status:r.status,message:r.message}));
   const issues=wb.addWorksheet('گزارش و محدودیت‌ها',{views:[{rightToLeft:true}]}); issues.getColumn(1).width=120;
-  ['پوشش آثار به داده عمومی ORCID و فایل‌های واردشده محدود است؛ همه مقالات همه پایگاه‌ها تضمین نمی‌شود.','نویسندگان، جلد، شماره و سایر داده‌های خالی در منابع در دسترس نبوده‌اند؛ مقدار حدسی تولید نشده است.','منابع در ستون منابع مشخص‌اند؛ ورود یک Scopus ID به معنی دریافت از Scopus نیست.','فقط DOI یکسان یا کلید یکسان اثر ادغام می‌شود؛ تشابه عنوان به‌تنهایی مبنای ادغام نیست.',...warnings].forEach(t=>issues.addRow([t]));
+  ['پوشش آثار به داده عمومی ORCID و فایل‌های واردشده محدود است؛ همه مقالات همه پایگاه‌ها تضمین نمی‌شود.','نویسندگان، جلد، شماره و سایر داده‌های خالی در منابع در دسترس نبوده‌اند؛ مقدار حدسی تولید نشده است.','منابع در ستون منابع مشخص‌اند؛ ورود یک Scopus ID به معنی دریافت از Scopus نیست.','تکراری‌ها با DOI، کلید اثر یا عنوان یکسان پس از یکسان‌سازی نگارش، فقط برای هر پژوهشگر ادغام می‌شوند؛ کامل‌ترین ردیف مبناست و خانه‌های خالی تکمیل می‌شوند. مقاله مشترک برای هر فرد جدا می‌ماند. وضعیت نویسنده اول از ORCID یا نام کامل و ترتیب منبع تشخیص داده می‌شود؛ داده ناکافی یعنی نامشخص.',...warnings].forEach(t=>issues.addRow([t]));
   for(const sheet of wb.worksheets){sheet.getRow(1).font={bold:true};sheet.eachRow(r=>r.eachCell(c=>{c.alignment={vertical:'top',wrapText:true};c.numFmt='@';}));}
   await saveWorkbook(wb,`pajouhesh-${new Date().toISOString().slice(0,10)}.xlsx`);
 }
