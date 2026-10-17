@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { BookOpen, Plus, Upload, FileSpreadsheet, Download, ArrowLeft, Square, Check, Info, Trash2, X, CircleHelp, Database, ExternalLink, AlertTriangle, RefreshCw } from 'lucide-react';
+import { BookOpen, Plus, Upload, FileSpreadsheet, Download, ArrowLeft, Square, Info, Trash2, X, CircleHelp, Database, ExternalLink, AlertTriangle, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
 import { providerNames, providers, identityKey, mergePublications, type Identity, type Provider, type Publication, type ResearcherResult, type CollectResponse } from '@/lib/model';
 import { identitySchema, parseManual } from '@/lib/identifiers';
@@ -9,7 +9,8 @@ import Results from './results';
 interface Checkpoint { offset: number; resolvedOrcid?: string; resolution?: ResearcherResult['resolution']; snapshot?: string; finished?: boolean; hadWarnings?: boolean }
 const storageKey='pajouhesh-workspace-v1';
 const publicationSchema=z.object({key:z.string(),title:z.string(),authors:z.array(z.string()),journal:z.string(),year:z.string(),volume:z.string(),issue:z.string(),pages:z.string(),articleNumber:z.string(),doi:z.string(),issn:z.string(),publisher:z.string(),type:z.string(),url:z.string(),date:z.string(),sources:z.array(z.string()),queriedIds:z.array(z.string()),orcids:z.array(z.string()),notes:z.array(z.string()),retrievedAt:z.string(),originalPublication:z.string()});
-const savedSchema=z.object({queue:z.array(identitySchema).max(500),publications:z.array(publicationSchema).max(20000),warnings:z.array(z.string()).max(20000)});
+const researcherSchema=z.object({identity:identitySchema,resolvedOrcid:z.string().optional(),resolution:z.enum(['direct','user','wikidata']).optional(),name:z.string(),total:z.number(),status:z.enum(['complete','partial','unresolved','error']),message:z.string()});
+const savedSchema=z.object({queue:z.array(identitySchema).max(500),publications:z.array(publicationSchema).max(20000),researchers:z.array(researcherSchema).max(500).default([]),warnings:z.array(z.string()).max(20000)});
 const fa=(n:number):string=>n.toLocaleString('fa-IR');
 export default function Workspace(): React.JSX.Element {
   const [view,setView]=useState<'workspace'|'guide'|'sources'>('workspace');
@@ -22,11 +23,11 @@ export default function Workspace(): React.JSX.Element {
   const abort=useRef<AbortController|null>(null); const stop=useRef(false); const checkpoints=useRef<Record<string,Checkpoint>>({});
   const idsFile=useRef<HTMLInputElement>(null); const papersFile=useRef<HTMLInputElement>(null);
   useEffect(()=>{
-    try {const saved=localStorage.getItem(storageKey);if(saved){const data=savedSchema.parse(JSON.parse(saved));setQueue(data.queue);setPublications(data.publications);setWarnings(data.warnings);setSaveLocal(true);setMessage('فهرست ذخیره‌شده در همین مرورگر بازیابی شد.');}}
+    try {const saved=localStorage.getItem(storageKey);if(saved){const data=savedSchema.parse(JSON.parse(saved));setQueue(data.queue);setPublications(data.publications);setResearchers(data.researchers);setWarnings(data.warnings);setSaveLocal(true);setMessage('فهرست ذخیره‌شده در همین مرورگر بازیابی شد.');}}
     catch {setMessage('نسخه ذخیره‌شده قابل بازیابی نبود؛ می‌توانید دوباره فایل را وارد کنید.');}
     setReady(true); return ()=>abort.current?.abort();
   },[]);
-  useEffect(()=>{if(!ready)return;try{if(saveLocal)localStorage.setItem(storageKey,JSON.stringify({queue,publications,warnings}));else localStorage.removeItem(storageKey);}catch{setMessage('فضای ذخیره مرورگر کافی نیست؛ از اطلاعات اکسل بگیرید.');}},[queue,publications,warnings,saveLocal,ready]);
+  useEffect(()=>{if(!ready)return;try{if(saveLocal)localStorage.setItem(storageKey,JSON.stringify({queue,publications,researchers,warnings}));else localStorage.removeItem(storageKey);}catch{setMessage('فضای ذخیره مرورگر کافی نیست؛ از اطلاعات اکسل بگیرید.');}},[queue,publications,researchers,warnings,saveLocal,ready]);
   function addIdentities(identities:Identity[]): void {
     setQueue(old=>{const map=new Map(old.map(i=>[identityKey(i),i]));identities.forEach(i=>{const key=identityKey(i);const prev=map.get(key);if(prev?.orcid!==i.orcid)delete checkpoints.current[key];map.set(key,i);});if(map.size>500){setInputErrors(['در فهرست حداکثر ۵۰۰ شناسه مجاز است.']);return old;}return [...map.values()];});
   }

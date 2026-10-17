@@ -1,6 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { ArrowDownToLine, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileSearch, Search, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowDownToLine, ChevronLeft, ChevronRight, ExternalLink, FileSearch, Search, SlidersHorizontal, X } from 'lucide-react';
 import { safeUrl, type Publication } from '@/lib/model';
 interface Props { publications: Publication[]; busy: boolean; exporting: boolean; onExport: (rows: Publication[]) => void }
 const fa = (n: number): string => n.toLocaleString('fa-IR');
